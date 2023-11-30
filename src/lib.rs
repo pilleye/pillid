@@ -1,348 +1,410 @@
-//! A tinier, prefixed, URL-friendly, time-sortable, unique ID storable on the stack.
+//! A tiny, secure, URL-friendly, prefixed (optional), timestamped (optional),
+//! unique string ID generator
+//!
+//! **Safe.** It uses cryptographically strong random APIs
+//! and guarantees a proper distribution of symbols.
+//!
+//! **Compact.** It uses a larger alphabet than UUID (`A-Za-z0-9`)
+//! and has more unique IDs in just 22 symbols instead of 36.
+//!
+//! ```toml
+//! [dependencies]
+//! pillid = "0.4.0"
+//! ```
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn main() {
+//!    let id = pillid!(); //=> "cNbQxzR55W2RbkPoERACA"
+//! }
+//! ```
+//!
+//! ## Usage
+//!
+//! ### Simple
+//!
+//! The main module uses URL-friendly symbols (`A-Za-z0-9`) and returns an ID
+//! with 22 characters (equivalent to 128 random bits).
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn main() {
+//!    let id = pillid!(); //=> "cNbQxzR55W2RbkPoERACA"
+//! }
+//! ```
+//ghnfvhtkbjvibclbikuitg!
+//! ### Custom length
+//!
+//! If you want to reduce ID length (and increase collisions probability),
+//! you can pass the length as an argument generate function:
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn main() {
+//!    let id = pillid!(10); //=> "QhpvygNybI"
+//! }
+//! ```
+//!
+//! ### Custom Alphabet or Length
+//!
+//! If you want to change the ID's alphabet or length
+//! you can use the low-level `custom` module.
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn main() {
+//!     let alphabet: [char; 16] = [
+//!         '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', 'a', 'b', 'c', 'd', 'e', 'f'
+//!     ];
+//!
+//!    let id = pillid!(10, &alphabet); //=> "f42ega7402"
+//! }
+//! ```
+//!
+//! Alphabet must contain 256 symbols or less.
+//! Otherwise, the generator will not be secure.
+//!
+//! ### Custom Random Bytes Generator
+//!
+//! You can replace the default safe random generator using the `complex` module.
+//! For instance, to use a seed-based generator.
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn random_byte () -> u8 {
+//!     0
+//! }
+//!
+//! fn main() {
+//!     fn random (size: usize) -> Vec<u8> {
+//!         let mut bytes: Vec<u8> = vec![0; size];
+//!
+//!         for i in 0..size {
+//!             bytes[i] = random_byte();
+//!         }
+//!
+//!         bytes
+//!     }
+//!
+//!     pillid!(10, &['a', 'b', 'c', 'd', 'e', 'f'], random); //=> "fbaefaadeb"
+//! }
+//! ```
+//!
+//! `random` function must accept the array size and return an vector
+//! with random numbers.
+//!
+//! If you want to use the same URL-friendly symbols with `format`,
+//! you can get the default alphabet from the `url` module:
+//!
+//! ```rust
+//! use pillid::pillid;
+//!
+//! fn random (size: usize) -> Vec<u8> {
+//!     let result: Vec<u8> = vec![0; size];
+//!
+//!     result
+//! }
+//!
+//! fn main() {
+//!     pillid!(10, &pillid::alphabet::DEFAULT, random); //=> "93celLtuub"
+//! }
+//! ```
+//!
 
-use std::ffi::c_char;
-use std::ffi::CStr;
-use std::fmt::Debug;
-use std::fmt::Display;
-use std::str::FromStr;
+#![doc(
+    html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk.png",
+    html_favicon_url = "https://www.rust-lang.org/favicon.ico",
+    html_root_url = "https://docs.rs/pillid"
+)]
 
-use anyhow::Result;
-use chrono::Utc;
-use serde::Deserialize;
-use serde::Serialize;
-use thiserror::Error;
+use std::time::SystemTime;
 
-#[cfg(feature = "sqlx")]
-mod db;
+#[cfg(feature = "smartstring")]
+use smartstring::alias::String;
 
-mod macros;
-mod rng;
+pub mod alphabet;
+pub mod rngs;
+mod timestamp;
+mod utils;
 
-/// The maximum length of the prefix.
-const PREFIX_BYTES: usize = 32;
-
-/// The number of digits required to represent the timestamp.
-const PREFIX_LENGTH: usize = PREFIX_BYTES;
-
-/// The number of bytes to represent the timestamp.
-const TIMESTAMP_BYTES: usize = 8;
-
-/// The number of digits required to represent the timestamp.
-/// Calculated by \lfloor log_62 (number of bits) + 1 \rfloor
+/// Struct to hold the configuration for an arbitrary ID generator.
 ///
-/// This actually requires 11 bytes, but with 6 digits, zzzzzz == December 3769,
-/// so unless this exists for 2000 years, we're fine.
-const TIMESTAMP_LENGTH: usize = 6;
-
-/// Gives us 8 * RANDOMNESS_LENGTH bits of entropy.
-/// This is 128 bits of entropy.
-const RANDOMNESS_BYTES: usize = 16;
-
-/// The number of digits required to represent the random number.
-/// Calculated by \lfloor log_62 (number of bits) + 1 \rfloor
-const RANDOM_LENGTH: usize = 22;
-
-/// The characters to use to generate an ID.
-const CHARSET: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-/// The maximum length of an ID.
-const MAX_LENGTH_PILLID: usize = PREFIX_LENGTH + TIMESTAMP_LENGTH + RANDOM_LENGTH;
-
-/// An ID that may be used to identify a resource.
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialOrd, PartialEq)]
-pub struct Pillid([u8; MAX_LENGTH_PILLID + 1]);
-
-impl Pillid {
-    pub fn builder() -> PillidBuilder {
-        PillidBuilder::default()
-    }
-
-    pub fn new(prefix: &str) -> Self {
-        PillidBuilder::new().with_prefix(prefix).unwrap().build()
-    }
-}
-
-impl Default for Pillid {
-    fn default() -> Self {
-        unsafe { Pillid(std::mem::zeroed()) }
-    }
-}
-
-impl Display for Pillid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", str_from_bytes(&self.0))
-    }
-}
-
-impl Debug for Pillid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
-    }
-}
-
-impl FromStr for Pillid {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.as_bytes().len() >= MAX_LENGTH_PILLID {
-            return Err(anyhow::anyhow!("Pillid is too long"));
-        }
-
-        let mut bytes: [u8; MAX_LENGTH_PILLID + 1] = unsafe { std::mem::zeroed() };
-        bytes[..s.as_bytes().len()].copy_from_slice(s.as_bytes());
-        Ok(Pillid(bytes))
-    }
-}
-
-impl From<String> for Pillid {
-    fn from(s: String) -> Self {
-        Pillid::from_str(&s).unwrap()
-    }
-}
-
-impl Serialize for Pillid {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(str_from_bytes(&self.0))
-    }
-}
-
-impl<'de> Deserialize<'de> for Pillid {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-
-        if s.as_bytes().len() > MAX_LENGTH_PILLID {
-            return Err(serde::de::Error::custom("Pillid is too long"));
-        }
-
-        Ok(Pillid::from(s))
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("prefix must be at most {} characters", PREFIX_LENGTH)]
-    PrefixTooLong,
-}
-
-/// A unique identifier across the application.
+/// # Example
 ///
-/// This contains a ASCII prefix of at most 16 characters, a timestamp to the
-/// nearest second, and a CSPRNG-based random number in base62.
-#[derive(Clone, Copy, Eq, Hash, Ord, PartialOrd, PartialEq)]
-pub struct PillidBuilder {
-    prefix: Option<[u8; PREFIX_BYTES]>,
-    timestamp: [u8; TIMESTAMP_BYTES],
-    random: [u8; RANDOMNESS_BYTES],
+/// ```
+/// use pillid::PillidGenerator;
+///
+/// let generator = PillidGenerator::new().with_prefix("pre".into()).with_timestamp();
+/// let id = generator.generate(5, &['0', '1', '2'], |_| vec![0; 10]);
+/// //=> "pre_{timestamp}00000"
+/// assert!(id.starts_with("pre_"));
+/// assert!(id.ends_with("00000"));
+/// assert_ne!(id, "pre_00000");
+/// ```
+pub struct PillidGenerator {
+    prefix: Option<String>,
+    timestamp: bool,
 }
 
-impl Default for PillidBuilder {
-    fn default() -> Self {
-        PillidBuilder {
+impl PillidGenerator {
+    pub fn new() -> Self {
+        PillidGenerator {
             prefix: None,
-            timestamp: [0u8; TIMESTAMP_BYTES],
-            random: [0u8; RANDOMNESS_BYTES],
+            timestamp: false,
         }
     }
-}
 
-impl Display for PillidBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut timestamp_bytes = [0; TIMESTAMP_LENGTH + 1];
-        let mut random_bytes = [0; RANDOM_LENGTH + 1];
+    pub fn with_prefix(mut self, prefix: String) -> Self {
+        self.prefix = Some(prefix);
+        self
+    }
 
-        fn u128_to_base62_str(n: u128, len: usize, output_buffer: &mut [u8]) {
-            let mut n = n;
+    pub fn with_timestamp(mut self) -> Self {
+        self.timestamp = true;
+        self
+    }
 
-            for i in (0..len).rev() {
-                output_buffer[i] = *CHARSET.get((n % 62) as usize).unwrap();
-                n /= 62;
-            }
-        }
-
-        u128_to_base62_str(
-            u64::from_be_bytes(*self.timestamp()).into(),
-            TIMESTAMP_LENGTH,
-            &mut timestamp_bytes,
-        );
-
-        u128_to_base62_str(
-            u128::from_be_bytes(*self.random()),
-            RANDOM_LENGTH,
-            &mut random_bytes,
-        );
-
-        if let Some(prefix) = self.prefix {
-            write!(f, "{}_", str_from_bytes(&prefix))?;
-        }
-
-        write!(
-            f,
-            "{}{}",
-            str_from_bytes(&timestamp_bytes),
-            str_from_bytes(&random_bytes)
+    pub fn generate(
+        self,
+        size: usize,
+        alphabet: &[char],
+        random: impl Fn(usize) -> Vec<u8>,
+    ) -> String {
+        generate(
+            size,
+            alphabet,
+            self.prefix,
+            self.timestamp.then(|| {
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            }),
+            random,
         )
     }
 }
 
-impl PillidBuilder {
-    pub(crate) fn new() -> Self {
-        let timestamp = (Utc::now().timestamp() as u64).to_be_bytes();
-
-        PillidBuilder::default()
-            .with_timestamp(timestamp)
-            .with_random(rng::bytes())
-    }
-
-    pub fn random(&self) -> &[u8; RANDOMNESS_BYTES] {
-        &self.random
-    }
-
-    pub fn set_random(&mut self, random: [u8; RANDOMNESS_BYTES]) {
-        self.random = random
-    }
-
-    pub fn with_random(self, random: [u8; RANDOMNESS_BYTES]) -> Self {
-        let mut id = self;
-        id.set_random(random);
-        id
-    }
-
-    pub fn timestamp(&self) -> &[u8; TIMESTAMP_BYTES] {
-        &self.timestamp
-    }
-
-    pub fn set_timestamp(&mut self, timestamp: [u8; TIMESTAMP_BYTES]) {
-        self.timestamp = timestamp;
-    }
-
-    pub fn with_timestamp(self, timestamp: [u8; TIMESTAMP_BYTES]) -> Self {
-        let mut id = self;
-        id.set_timestamp(timestamp);
-        id
-    }
-
-    pub fn prefix(&self) -> Option<&str> {
-        self.prefix.as_ref().map(|p| str_from_bytes(p))
-    }
-
-    pub fn set_prefix(&mut self, prefix: &str) -> Result<(), Error> {
-        if prefix.as_bytes().len() > PREFIX_LENGTH {
-            return Err(Error::PrefixTooLong);
-        }
-
-        let mut new_prefix = [0u8; 32];
-        new_prefix[..prefix.as_bytes().len()].copy_from_slice(prefix.as_bytes());
-        self.prefix = Some(new_prefix);
-
-        Ok(())
-    }
-
-    pub fn with_prefix(self, prefix: &str) -> Result<Self, Error> {
-        let mut id = self;
-        id.set_prefix(prefix)?;
-        Ok(id)
-    }
-
-    pub fn build(self) -> Pillid {
-        let mut output_bytes = [0u8; MAX_LENGTH_PILLID + 1];
-        let output_str = self.to_string();
-        output_bytes[..output_str.len()].copy_from_slice(output_str.as_bytes());
-        Pillid(output_bytes)
-    }
-}
-
-fn str_from_bytes(bytes: &[u8]) -> &str {
-    unsafe { CStr::from_ptr(bytes.as_ptr() as *const c_char) }
-        .to_str()
-        .unwrap()
-}
-
 #[cfg(test)]
-mod tests {
+mod test_config {
     use super::*;
 
     #[test]
-    fn test_default() -> Result<()> {
-        let pillid = PillidBuilder::default();
-        assert_eq!(pillid.prefix(), None);
-        assert_eq!(pillid.timestamp(), &[0x00; TIMESTAMP_BYTES]);
-        assert_eq!(pillid.random(), &[0x00; RANDOMNESS_BYTES]);
-        Ok(())
+    fn generates_random_string() {
+        fn random(size: usize) -> Vec<u8> {
+            [2, 255, 0, 1].iter().cloned().cycle().take(size).collect()
+        }
+
+        assert_eq!(generate(4, &['0', '1', '2'], None, None, random), "2012");
     }
 
     #[test]
-    fn test_with_prefix() -> Result<()> {
-        let pillid = PillidBuilder::default().with_prefix("test")?;
-        assert_eq!(pillid.prefix(), Some("test"));
-        assert_eq!(pillid.timestamp(), &[0x00; TIMESTAMP_BYTES]);
-        assert_eq!(pillid.random(), &[0x00; RANDOMNESS_BYTES]);
-        Ok(())
+    fn generates_random_string_with_timestamp() {
+        fn random(size: usize) -> Vec<u8> {
+            [2, 255, 0, 1].iter().cloned().cycle().take(size).collect()
+        }
+
+        let current_time = 15u64;
+        let id = generate(4, &['0', '1', '2'], None, Some(current_time), random);
+
+        assert_eq!(id, "1202012");
+
+        let three_thousand_ce = 32503708800u64;
+        let id = generate(4, &['0', '1', '2'], None, Some(three_thousand_ce), random);
+
+        assert_eq!(id, "100022200201101110112002012");
     }
 
     #[test]
-    fn test_with_prefix_too_long() -> Result<()> {
-        // 32 long
-        PillidBuilder::default().with_prefix("12345678901234567890123456789012")?;
-
-        // 33 long
-        assert!(PillidBuilder::default()
-            .with_prefix("123456789012345678901234567890123")
-            .is_err());
-
-        Ok(())
+    #[should_panic]
+    fn bad_alphabet() {
+        let alphabet: Vec<char> = (0..32_u8).cycle().map(|i| i as char).take(1000).collect();
+        pillid!(22, &alphabet);
     }
 
     #[test]
-    fn test_with_timestamp() -> Result<()> {
-        let pillid = PillidBuilder::default().with_timestamp([0xFF; TIMESTAMP_BYTES]);
-        assert_eq!(pillid.prefix(), None);
-        assert_eq!(pillid.timestamp(), &[0xFF; TIMESTAMP_BYTES]);
-        assert_eq!(pillid.random(), &[0x00; RANDOMNESS_BYTES]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_with_random() -> Result<()> {
-        let pillid = PillidBuilder::default().with_random([0xFF; RANDOMNESS_BYTES]);
-        assert_eq!(pillid.prefix(), None);
-        assert_eq!(pillid.timestamp(), &[0x00; TIMESTAMP_BYTES]);
-        assert_eq!(pillid.random(), &[0xFF; RANDOMNESS_BYTES]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_display() -> Result<()> {
-        let pillid = PillidBuilder::default()
-            .with_prefix("prefixed")?
-            .with_timestamp([0xFF; TIMESTAMP_BYTES])
-            .with_random([0xFF; RANDOMNESS_BYTES])
-            .build();
-
-        assert_eq!(pillid.to_string(), "prefixed_16AHYF7n42DGM5Tflk9n8mt7Fhc7");
-
-        Ok(())
-    }
-
-    pillid!(Foo, "foo");
-
-    #[test]
-    fn test_custom_pillid() -> Result<()> {
-        let pillid = FooPillid::new();
-        assert!(pillid.to_string().starts_with("foo_"));
-        Ok(())
-    }
-
-    pillid!(Bar, String::from("bar").as_str());
-
-    #[test]
-    fn test_non_literal_custom_pillid() -> Result<()> {
-        let pillid = BarPillid::new();
-        assert!(pillid.to_string().starts_with("bar_"));
-        Ok(())
+    fn non_power_2() {
+        let id: String = pillid!(42, &alphabet::DEFAULT);
+        assert_eq!(id.len(), 42);
     }
 }
+
+pub fn generate(
+    size: usize,
+    alphabet: &[char],
+    prefix: Option<String>,
+    timestamp: Option<u64>,
+    random: impl Fn(usize) -> Vec<u8>,
+) -> String {
+    debug_assert!(
+        alphabet.len() <= u8::max_value() as usize,
+        "The alphabet cannot be longer than a `u8` (to comply with the `random` function)"
+    );
+
+    let mask = alphabet.len().next_power_of_two() - 1;
+    let step: usize = 2 * size * mask;
+
+    let mut ts = None;
+    if let Some(timestamp) = timestamp {
+        ts = Some(timestamp::u64_to_string(timestamp, alphabet));
+    }
+
+    #[cfg(not(feature = "smartstring"))]
+    let mut id = String::with_capacity(utils::string_size(size, &prefix, &ts));
+    #[cfg(feature = "smartstring")]
+    let mut id = String::new();
+
+    if let Some(prefix) = prefix {
+        id.push_str(&prefix);
+        id.push('_');
+    }
+
+    if let Some(ts) = ts {
+        id.push_str(&ts);
+    }
+
+    let mut added_chars = 0;
+    loop {
+        let bytes = (random)(step);
+
+        for &byte in &bytes {
+            let byte = byte as usize & mask;
+
+            if alphabet.len() > byte {
+                id.push(alphabet[byte]);
+                added_chars += 1;
+
+                if added_chars == size {
+                    return id;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test_format {
+    use super::*;
+
+    #[test]
+    fn generates_random_string_with_prefix() {
+        fn random(size: usize) -> Vec<u8> {
+            [2, 255, 0, 1].iter().cloned().cycle().take(size).collect()
+        }
+
+        let id =
+            PillidGenerator::new()
+                .with_prefix("pre".into())
+                .generate(4, &['0', '1', '2'], random);
+
+        assert_eq!(id, "pre_2012");
+    }
+
+    #[test]
+    fn generates_random_string_with_timestamp() {
+        fn random(size: usize) -> Vec<u8> {
+            [2, 255, 0, 1].iter().cloned().cycle().take(size).collect()
+        }
+
+        let id = PillidGenerator::new()
+            .with_prefix("pre".into())
+            .with_timestamp()
+            .generate(4, &['0', '1', '2'], random);
+
+        assert!(id.starts_with("pre_"));
+        assert!(id.ends_with("2012"));
+        assert_ne!(id, "pre_2012");
+    }
+}
+
+#[macro_export]
+macro_rules! pillid {
+    // simple
+    () => {
+        $crate::generate(
+            22,
+            &$crate::alphabet::DEFAULT,
+            None,
+            None,
+            $crate::rngs::default,
+        )
+    };
+
+    // generate
+    ($size:expr) => {
+        $crate::generate(
+            $size,
+            &$crate::alphabet::DEFAULT,
+            None,
+            None,
+            $crate::rngs::default,
+        )
+    };
+
+    // custom
+    ($size:expr, $alphabet:expr) => {
+        $crate::generate($size, $alphabet, None, None, $crate::rngs::default)
+    };
+
+    // complex
+    ($size:expr, $alphabet:expr, $random:expr) => {
+        $crate::generate($size, $alphabet, None, None, $random)
+    };
+}
+
+#[cfg(test)]
+mod test_macros {
+    use super::*;
+
+    #[test]
+    fn simple() {
+        let id: String = pillid!();
+        assert_eq!(id.len(), 22);
+    }
+
+    #[test]
+    fn generate() {
+        let id: String = pillid!(42);
+
+        assert_eq!(id.len(), 42);
+    }
+
+    #[test]
+    fn custom() {
+        let id: String = pillid!(42, &alphabet::URLSAFE);
+
+        assert_eq!(id.len(), 42);
+    }
+
+    #[test]
+    fn complex() {
+        let id: String = pillid!(4, &alphabet::URLSAFE, rngs::default);
+
+        assert_eq!(id.len(), 4);
+    }
+
+    #[test]
+    fn closure() {
+        let uuid = "8936ad0c-9443-4007-9430-e223c64d4629";
+
+        let id1 = pillid!(22, &alphabet::DEFAULT, |_| uuid.as_bytes().to_vec());
+        let id2 = pillid!(22, &alphabet::DEFAULT, |_| uuid.as_bytes().to_vec());
+
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn simple_expression() {
+        let id: String = pillid!(44 / 2);
+
+        assert_eq!(id.len(), 22);
+    }
+}
+
+#[cfg(doctest)]
+doc_comment::doctest!("../README.md");
