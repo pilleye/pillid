@@ -261,7 +261,7 @@ fn str_from_bytes(bytes: &[u8]) -> &str {
 
 #[macro_export]
 macro_rules! pillid {
-    ($t:ident, $prefix:literal) => {
+    ($t:ident, $prefix:expr) => {
         paste::paste! {
             #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct [<$t Pillid>]($crate::Pillid);
@@ -425,4 +425,20 @@ mod tests {
     }
 
     pillid!(Foo, "foo");
+
+    #[test]
+    fn test_custom_pillid() -> Result<()> {
+        let pillid = FooPillid::new();
+        assert!(pillid.to_string().starts_with("foo_"));
+        Ok(())
+    }
+
+    pillid!(Bar, String::from("bar").as_str());
+
+    #[test]
+    fn test_non_literal_custom_pillid() -> Result<()> {
+        let pillid = BarPillid::new();
+        assert!(pillid.to_string().starts_with("bar_"));
+        Ok(())
+    }
 }
