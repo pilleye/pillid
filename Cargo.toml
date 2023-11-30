@@ -1,6 +1,6 @@
 [package]
 name = "pillid"
-version = "0.1.4"
+version = "0.1.5"
 authors = ["Aditya Pillai <github.4nsjt@simplelogin.com>"]
 edition = "2021"
 license = "MIT"
@@ -28,4 +28,4 @@ thiserror = "1.0.49"
 
 [features]
 default = []
-sqlx = ["default", "dep:sqlx"]
+sqlx = ["dep:sqlx"]
