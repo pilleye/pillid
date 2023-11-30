@@ -1,10 +1,9 @@
 [package]
 name = "pillid"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Aditya Pillai <github.4nsjt@simplelogin.com>"]
 edition = "2021"
 license = "MIT"
-license-file = "LICENSE"
 repository = "https://github.com/pilleye/pillid"
 description = "A tinier, prefixed, URL-friendly, time-sortable, unique ID storable on the stack."
 
