@@ -5,9 +5,9 @@ use sqlx::Encode;
 use sqlx::Sqlite;
 use sqlx::Type;
 
-use super::Ezid;
+use super::Pillid;
 
-impl<'q> Encode<'q, Sqlite> for Ezid {
+impl<'q> Encode<'q, Sqlite> for Pillid {
     fn encode(self, args: &mut Vec<SqliteArgumentValue<'q>>) -> IsNull {
         <String as Encode<Sqlite>>::encode(self.to_string(), args)
     }
@@ -17,7 +17,7 @@ impl<'q> Encode<'q, Sqlite> for Ezid {
     }
 }
 
-impl Type<Sqlite> for Ezid {
+impl Type<Sqlite> for Pillid {
     fn type_info() -> SqliteTypeInfo {
         <&str as Type<Sqlite>>::type_info()
     }
