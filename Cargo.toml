@@ -1,6 +1,6 @@
 [package]
 name = "pillid"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Aditya Pillai <github.4nsjt@simplelogin.com>"]
 edition = "2021"
 license = "MIT"

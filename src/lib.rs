@@ -122,7 +122,7 @@
     html_root_url = "https://docs.rs/pillid"
 )]
 
-use std::time::SystemTime;
+use std::{borrow::Cow, time::SystemTime};
 
 #[cfg(feature = "smartstring")]
 use smartstring::alias::String;
@@ -174,7 +174,7 @@ impl PillidGenerator {
         size: usize,
         alphabet: &[char],
         random: impl Fn(usize) -> Vec<u8>,
-    ) -> String {
+    ) -> Cow<'_, str> {
         generate(
             size,
             alphabet,
@@ -229,7 +229,7 @@ mod test_config {
 
     #[test]
     fn non_power_2() {
-        let id: String = pillid!(42, &alphabet::DEFAULT);
+        let id = pillid!(42, &alphabet::DEFAULT);
         assert_eq!(id.len(), 42);
     }
 }
@@ -240,7 +240,7 @@ pub fn generate(
     prefix: Option<String>,
     timestamp: Option<u64>,
     random: impl Fn(usize) -> Vec<u8>,
-) -> String {
+) -> Cow<'_, str> {
     debug_assert!(
         alphabet.len() <= u8::max_value() as usize,
         "The alphabet cannot be longer than a `u8` (to comply with the `random` function)"
@@ -280,7 +280,7 @@ pub fn generate(
                 added_chars += 1;
 
                 if added_chars == size {
-                    return id;
+                    return id.into();
                 }
             }
         }
@@ -363,27 +363,27 @@ mod test_macros {
 
     #[test]
     fn simple() {
-        let id: String = pillid!();
+        let id = pillid!();
         assert_eq!(id.len(), 22);
     }
 
     #[test]
     fn generate() {
-        let id: String = pillid!(42);
+        let id = pillid!(42);
 
         assert_eq!(id.len(), 42);
     }
 
     #[test]
     fn custom() {
-        let id: String = pillid!(42, &alphabet::URLSAFE);
+        let id = pillid!(42, &alphabet::URLSAFE);
 
         assert_eq!(id.len(), 42);
     }
 
     #[test]
     fn complex() {
-        let id: String = pillid!(4, &alphabet::URLSAFE, rngs::default);
+        let id = pillid!(4, &alphabet::URLSAFE, rngs::default);
 
         assert_eq!(id.len(), 4);
     }
@@ -400,7 +400,7 @@ mod test_macros {
 
     #[test]
     fn simple_expression() {
-        let id: String = pillid!(44 / 2);
+        let id = pillid!(44 / 2);
 
         assert_eq!(id.len(), 22);
     }
