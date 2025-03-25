@@ -127,6 +127,8 @@ use std::{borrow::Cow, time::SystemTime};
 #[cfg(feature = "smartstring")]
 use smartstring::alias::String;
 
+pub type Pillid<'a> = Cow<'a, str>;
+
 pub mod alphabet;
 pub mod rngs;
 mod timestamp;
@@ -174,7 +176,7 @@ impl PillidGenerator {
         size: usize,
         alphabet: &[char],
         random: impl Fn(usize) -> Vec<u8>,
-    ) -> Cow<'_, str> {
+    ) -> Pillid {
         generate(
             size,
             alphabet,
@@ -240,7 +242,7 @@ pub fn generate(
     prefix: Option<String>,
     timestamp: Option<u64>,
     random: impl Fn(usize) -> Vec<u8>,
-) -> Cow<'_, str> {
+) -> Pillid {
     debug_assert!(
         alphabet.len() <= u8::max_value() as usize,
         "The alphabet cannot be longer than a `u8` (to comply with the `random` function)"
