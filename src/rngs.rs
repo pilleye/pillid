@@ -1,8 +1,8 @@
-use rand::{
-    rng,
-    rngs::{SmallRng, StdRng},
-    Rng, SeedableRng,
-};
+use rand::rng;
+use rand::rngs::SmallRng;
+use rand::rngs::StdRng;
+use rand::Rng;
+use rand::SeedableRng;
 
 pub fn default(size: usize) -> Vec<u8> {
     let mut rng = StdRng::from_os_rng();

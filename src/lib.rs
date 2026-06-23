@@ -7,6 +7,9 @@ pub mod alphabet;
 pub mod rngs;
 mod timestamp;
 
+#[doc(hidden)]
+pub use paste;
+
 /// Number of base62 characters reserved for the timestamp in timestamped IDs.
 pub const TS_SIZE: usize = 8;
 
@@ -71,7 +74,10 @@ impl<T: Prefix, const N: usize> Pillid<T, N> {
 
         fill_base62(&mut inner[rand_start..]);
 
-        Self { inner, _marker: PhantomData }
+        Self {
+            inner,
+            _marker: PhantomData,
+        }
     }
 
     /// The compile-time prefix string for this ID type.
@@ -109,7 +115,11 @@ impl<T: Prefix, const N: usize> FromStr for Pillid<T, N> {
         let expected_prefix = format!("{}_", T::VALUE);
         let id_str = s.strip_prefix(&expected_prefix).ok_or_else(|| {
             let found_prefix = s.rsplit_once('_').map_or(s, |(prefix, _)| prefix);
-            format!("wrong prefix: expected '{}', found '{}'", T::VALUE, found_prefix)
+            format!(
+                "wrong prefix: expected '{}', found '{}'",
+                T::VALUE,
+                found_prefix
+            )
         })?;
 
         if id_str.len() > N {
@@ -122,7 +132,10 @@ impl<T: Prefix, const N: usize> FromStr for Pillid<T, N> {
         // Shorter legacy IDs are right-padded with null bytes. as_str() strips them.
         let mut inner = [0u8; N];
         inner[..id_str.len()].copy_from_slice(id_str.as_bytes());
-        Ok(Self { inner, _marker: PhantomData })
+        Ok(Self {
+            inner,
+            _marker: PhantomData,
+        })
     }
 }
 
@@ -187,7 +200,7 @@ macro_rules! prefix {
     };
 
     ($vis:vis $name:ident, $prefix:literal, $size:literal) => {
-        ::paste::paste! {
+        $crate::paste::paste! {
             #[doc(hidden)]
             #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             $vis struct [<__ $name Prefix>];
@@ -206,7 +219,7 @@ macro_rules! prefix {
     };
 
     ($vis:vis $name:ident, $prefix:literal, $size:literal, ts) => {
-        ::paste::paste! {
+        $crate::paste::paste! {
             #[doc(hidden)]
             #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             $vis struct [<__ $name Prefix>];
@@ -230,7 +243,11 @@ macro_rules! prefix {
 mod serde_impl {
     use std::str::FromStr;
 
-    use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+    use serde::de;
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serialize;
+    use serde::Serializer;
 
     use super::*;
 
@@ -250,11 +267,12 @@ mod serde_impl {
 
 #[cfg(feature = "sqlx")]
 mod sqlx_impl {
-    use sqlx::{
-        Database, Decode, Type,
-        encode::{Encode, IsNull},
-        error::BoxDynError,
-    };
+    use sqlx::encode::Encode;
+    use sqlx::encode::IsNull;
+    use sqlx::error::BoxDynError;
+    use sqlx::Database;
+    use sqlx::Decode;
+    use sqlx::Type;
 
     use super::*;
 
@@ -285,10 +303,7 @@ mod sqlx_impl {
     where
         String: Encode<'q, DB>,
     {
-        fn encode_by_ref(
-            &self,
-            buf: &mut DB::ArgumentBuffer,
-        ) -> Result<IsNull, BoxDynError> {
+        fn encode_by_ref(&self, buf: &mut DB::ArgumentBuffer) -> Result<IsNull, BoxDynError> {
             String::encode(self.to_string(), buf)
         }
     }
