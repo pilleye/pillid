@@ -1,21 +1,19 @@
 [package]
 name = "pillid"
-version = "0.3.3"
+version = "0.4.0"
 authors = ["Aditya Pillai <github.4nsjt@simplelogin.com>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/pilleye/pillid"
 description = "A tinier, prefixed, URL-friendly, time-sortable, unique ID storable on the stack."
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 rand = { version = "0.9.1", features = ["small_rng", "thread_rng"] }
-smartstring = { version = "1.0.1", optional = true }
-
-[dev-dependencies]
-doc-comment = "0.3"
+paste = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+sqlx = { version = "0.9", optional = true }
 
 [features]
 default = []
-smartstring = ["dep:smartstring"]
+serde = ["dep:serde"]
+sqlx = ["dep:sqlx"]
