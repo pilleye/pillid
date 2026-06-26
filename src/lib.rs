@@ -65,7 +65,7 @@ impl<T: Prefix, const N: usize> Pillid<T, N> {
             let ts = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_secs();
+                .as_millis();
             inner[..TS_SIZE].copy_from_slice(&timestamp::encode_timestamp_8(ts));
             TS_SIZE
         } else {
