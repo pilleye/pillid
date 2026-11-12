@@ -1,11 +1,11 @@
+use rand::make_rng;
 use rand::rng;
 use rand::rngs::SmallRng;
 use rand::rngs::StdRng;
-use rand::Rng;
-use rand::SeedableRng;
+use rand::RngExt;
 
 pub fn default(size: usize) -> Vec<u8> {
-    let mut rng = StdRng::from_os_rng();
+    let mut rng: StdRng = make_rng();
     let mut result: Vec<u8> = vec![0; size];
 
     rng.fill(&mut result[..]);
@@ -26,7 +26,7 @@ mod test_default {
 }
 
 pub fn non_secure(size: usize) -> Vec<u8> {
-    let mut rng = SmallRng::from_os_rng();
+    let mut rng: SmallRng = make_rng();
     let mut result = vec![0u8; size];
 
     rng.fill(&mut result[..]);
